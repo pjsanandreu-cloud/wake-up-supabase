@@ -131,5 +131,7 @@ Feel free to open issues or PRs to add features like:
 
 ---
 
+Mantenimiento: activo desde septiembre 2026.
+
 Enjoy!  
 @wilhelmsendk
