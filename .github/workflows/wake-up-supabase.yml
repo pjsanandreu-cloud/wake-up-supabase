@@ -22,7 +22,6 @@ jobs:
         env:
           SUPABASE_PROJECTS_JSON: ${{ secrets.SUPABASE_PROJECTS_JSON }}
         run: |
-          # jq ya viene preinstalado en los runners ubuntu-latest de GitHub
           LENGTH=$(echo "$SUPABASE_PROJECTS_JSON" | jq '. | length')
           echo "📦 Found $LENGTH Supabase project(s)."
 
@@ -45,7 +44,7 @@ jobs:
               continue
             fi
 
-            # APUNTA A REST/V1: Esto sí interactúa con el motor PostgREST/Base de Datos
+            # APUNTA A REST/V1: Interactúa directamente con el motor PostgREST / PostgreSQL
             REST_URL="${URL%/}/rest/v1/"
             echo "🌐 Pinging PostgREST DB via: $REST_URL"
 
