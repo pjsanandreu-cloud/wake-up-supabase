@@ -45,7 +45,6 @@ jobs:
                   has_error = True
                   continue
 
-              # Target Auth Health endpoint which reliably responds HTTP 200 across all key types
               target_url = f"{url}/auth/v1/health"
               print(f"🌐 Pinging Database: {display_name}")
 
