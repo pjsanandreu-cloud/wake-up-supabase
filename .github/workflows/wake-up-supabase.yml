@@ -45,25 +45,26 @@ jobs:
                   has_error = True
                   continue
 
-              # Target Auth Health endpoint which reliably responds HTTP 200 across all key types
-              target_url = f"{url}/auth/v1/health"
+              # Target PostgREST API endpoint to trigger actual Database activity
+              target_url = f"{url}/rest/v1/?"
               print(f"🌐 Pinging Database: {display_name}")
 
               req = urllib.request.Request(
                   target_url,
                   headers={
                       "apikey": key,
-                      "Authorization": f"Bearer {key}"
+                      "Authorization": f"Bearer {key}",
+                      "Accept-Profile": "public"
                   }
               )
 
               try:
                   with urllib.request.urlopen(req, timeout=20) as response:
                       code = response.getcode()
-                      print(f"✅ {display_name} responded with HTTP {code} — project is active!\n")
+                      print(f"✅ {display_name} responded with HTTP {code} — Database is active!\n")
               except urllib.error.HTTPError as e:
                   if e.code in (200, 204):
-                      print(f"✅ {display_name} responded with HTTP {e.code} — project is active!\n")
+                      print(f"✅ {display_name} responded with HTTP {e.code} — Database is active!\n")
                   else:
                       print(f"❌ {display_name} FAILED with HTTP {e.code}: {e.reason}")
                       print(f"   Check your URL and API Key for this project.\n")
