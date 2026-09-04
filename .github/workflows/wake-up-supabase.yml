@@ -2,7 +2,7 @@ name: Wake Up Supabase
 
 on:
   schedule:
-    - cron: "0 6 * * *"   # Ejecuta una vez al día a las 06:00 UTC
+    - cron: "0 6 * * *"   # Ejecuta automáticamente cada día a las 06:00 UTC
   workflow_dispatch:       # Permite ejecución manual
 
 jobs:
@@ -10,61 +10,71 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Validate SUPABASE_PROJECTS_JSON secret exists
+      - name: Ping Supabase REST API (Database)
+        env:
+          SUPABASE_PROJECTS_JSON: ${{ secrets.SUPABASE_PROJECTS_JSON }}
         run: |
-          if [ -z "${{ secrets.SUPABASE_PROJECTS_JSON }}" ]; then
+          if [ -z "$SUPABASE_PROJECTS_JSON" ]; then
             echo "❌ Secret SUPABASE_PROJECTS_JSON is not set."
             echo "Go to Settings → Secrets and variables → Actions and add it."
             exit 1
           fi
 
-      - name: Ping Supabase REST API (Database) to keep awake
-        env:
-          SUPABASE_PROJECTS_JSON: ${{ secrets.SUPABASE_PROJECTS_JSON }}
-        run: |
-          LENGTH=$(echo "$SUPABASE_PROJECTS_JSON" | jq '. | length')
-          echo "📦 Found $LENGTH Supabase project(s)."
+          python3 -c '
+          import json, os, urllib.request, urllib.error, sys
 
-          if [ "$LENGTH" -eq 0 ]; then
-            echo "⚠️ No projects defined in SUPABASE_PROJECTS_JSON."
-            exit 0
-          fi
+          data = os.environ.get("SUPABASE_PROJECTS_JSON", "[]")
+          try:
+              projects = json.loads(data)
+          except Exception as e:
+              print(f"❌ Could not parse SUPABASE_PROJECTS_JSON: {e}")
+              sys.exit(1)
 
-          for i in $(seq 0 $((LENGTH - 1))); do
-            URL=$(echo "$SUPABASE_PROJECTS_JSON" | jq -r ".[$i].url")
-            KEY=$(echo "$SUPABASE_PROJECTS_JSON" | jq -r ".[$i].anon_key")
+          print(f"📦 Found {len(projects)} Supabase project(s).\n")
+          has_error = False
 
-            if [ -z "$URL" ] || [ "$URL" = "null" ]; then
-              echo "⚠️ Skipping project at index $i — missing url."
-              continue
-            fi
+          for idx, proj in enumerate(projects):
+              url = proj.get("url", "").rstrip("/")
+              key = proj.get("anon_key", "").strip()
+              name = proj.get("name", f"project-{idx+1}")
 
-            if [ -z "$KEY" ] || [ "$KEY" = "null" ]; then
-              echo "⚠️ Skipping $URL — missing anon_key."
-              continue
-            fi
+              display_name = f"{name} ({url})"
 
-            # APUNTA A REST/V1/: Consulta el esquema público OpenAPI para despertar Postgres
-            REST_URL="${URL%/}/rest/v1/?"
-            echo "🌐 Pinging PostgREST DB via: $REST_URL"
+              if not url or not key:
+                  print(f"❌ Skipping [{name}] — missing url or anon_key in JSON.")
+                  has_error = True
+                  continue
 
-            set +e
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-              -H "apikey: $KEY" \
-              -H "Authorization: Bearer $KEY" \
-              -H "Accept-Profile: public" \
-              "$REST_URL")
-            CURL_EXIT=$?
-            set -e
+              # Al añadir /? e incluir Accept-Profile, PostgREST sirve la spec OpenAPI (200 OK)
+              # e interactúa directamente con la base de datos Postgres.
+              target_url = f"{url}/rest/v1/?"
+              print(f"🌐 Pinging Database: {display_name}")
 
-            if [ "$CURL_EXIT" -ne 0 ]; then
-              echo "❌ Curl failed for $URL (exit code $CURL_EXIT). Skipping."
-              continue
-            fi
+              req = urllib.request.Request(
+                  target_url,
+                  headers={
+                      "apikey": key,
+                      "Authorization": f"Bearer {key}",
+                      "Accept-Profile": "public"
+                  }
+              )
 
-            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-              echo "✅ $URL responded with HTTP $HTTP_CODE — Database is active."
-            else
-              echo "❌ $URL responded with HTTP $HTTP_CODE — check project status or API key."
-            fi
-          done
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as response:
+                      code = response.getcode()
+                      print(f"✅ {display_name} responded with HTTP {code} — Database is active!\n")
+              except urllib.error.HTTPError as e:
+                  if e.code in (200, 204):
+                      print(f"✅ {display_name} responded with HTTP {e.code} — Database is active!\n")
+                  else:
+                      print(f"❌ {display_name} FAILED with HTTP {e.code}: {e.reason}")
+                      print(f"   Check your URL and API Key for this project.\n")
+                      has_error = True
+              except Exception as e:
+                  print(f"❌ Connection error for {display_name}: {e}\n")
+                  has_error = True
+
+          if has_error:
+              print("💥 One or more project pings failed. Check the logs above.")
+              sys.exit(1)
+          '
