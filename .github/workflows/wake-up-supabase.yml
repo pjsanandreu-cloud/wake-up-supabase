@@ -44,14 +44,15 @@ jobs:
               continue
             fi
 
-            # APUNTA A REST/V1: Interactúa directamente con el motor PostgREST / PostgreSQL
-            REST_URL="${URL%/}/rest/v1/"
+            # APUNTA A REST/V1/: Consulta el esquema público OpenAPI para despertar Postgres
+            REST_URL="${URL%/}/rest/v1/?"
             echo "🌐 Pinging PostgREST DB via: $REST_URL"
 
             set +e
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
               -H "apikey: $KEY" \
               -H "Authorization: Bearer $KEY" \
+              -H "Accept-Profile: public" \
               "$REST_URL")
             CURL_EXIT=$?
             set -e
