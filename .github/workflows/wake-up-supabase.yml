@@ -2,9 +2,8 @@ name: Wake Up Supabase
 
 on:
   schedule:
-    # Runs every day at 06:00 UTC
-    - cron: '0 6 * * *'
-  workflow_dispatch:  # Allows manual triggering
+    - cron: '0 6 * * *'  # Runs daily at 06:00 UTC
+  workflow_dispatch:      # Allows manual trigger
 
 jobs:
   ping-projects:
@@ -30,25 +29,19 @@ jobs:
             exit 0
           fi
 
-          # Timestamp actual en formato ISO-8601 UTC
+          # Current UTC ISO-8601 timestamp
           NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           for i in $(seq 0 $((LENGTH - 1))); do
             URL=$(echo "$SUPABASE_PROJECTS_JSON" | jq -r ".[$i].url")
             KEY=$(echo "$SUPABASE_PROJECTS_JSON" | jq -r ".[$i].anon_key")
 
-            if [ -z "$URL" ] || [ "$URL" = "null" ]; then
-              echo "⚠️ Skipping project at index $i — missing url."
+            if [ -z "$URL" ] || [ "$URL" = "null" ] || [ -z "$KEY" ] || [ "$KEY" = "null" ]; then
+              echo "⚠️ Skipping project index $i — missing url or anon_key."
               continue
             fi
 
-            if [ -z "$KEY" ] || [ "$KEY" = "null" ]; then
-              echo "⚠️ Skipping $URL — missing anon_key."
-              continue
-            fi
-
-            # --- ACTUALIZACIÓN EN LA BASE DE DATOS ---
-            # Hacemos un UPDATE (PATCH) sobre la fila id=1 para renovar pinged_at
+            # UPDATE row id=1 on keepalive table
             PING_URL="${URL%/}/rest/v1/keepalive?id=eq.1"
             echo "🌐 Updating PostgreSQL keepalive via: $PING_URL"
 
@@ -70,8 +63,8 @@ jobs:
             fi
 
             if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-              echo "✅ $URL responded with HTTP $HTTP_CODE — pinged_at set to $NOW."
+              echo "✅ $URL updated successfully (HTTP $HTTP_CODE) — pinged_at set to $NOW."
             else
-              echo "❌ $URL responded with HTTP $HTTP_CODE — check RLS permissions or URL."
+              echo "❌ $URL responded with HTTP $HTTP_CODE — verify RLS permissions for UPDATE."
             fi
           done
