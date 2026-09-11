@@ -17,7 +17,7 @@ jobs:
             exit 1
           fi
 
-      - name: Ping Supabase projects (Update keepalive)
+      - name: Update keepalive table on Supabase projects
         env:
           SUPABASE_PROJECTS_JSON: ${{ secrets.SUPABASE_PROJECTS_JSON }}
         run: |
@@ -29,7 +29,6 @@ jobs:
             exit 0
           fi
 
-          # Current UTC ISO-8601 timestamp
           NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           for i in $(seq 0 $((LENGTH - 1))); do
@@ -41,7 +40,6 @@ jobs:
               continue
             fi
 
-            # UPDATE row id=1 on keepalive table
             PING_URL="${URL%/}/rest/v1/keepalive?id=eq.1"
             echo "🌐 Updating PostgreSQL keepalive via: $PING_URL"
 
@@ -65,6 +63,6 @@ jobs:
             if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
               echo "✅ $URL updated successfully (HTTP $HTTP_CODE) — pinged_at set to $NOW."
             else
-              echo "❌ $URL responded with HTTP $HTTP_CODE — verify RLS permissions for UPDATE."
+              echo "❌ $URL responded with HTTP $HTTP_CODE — verify RLS permissions or API key."
             fi
           done
