@@ -18,14 +18,10 @@ jobs:
             exit 1
           fi
 
-      - name: Ping Supabase projects (DB keepalive)
+      - name: Ping Supabase projects (Update keepalive)
         env:
           SUPABASE_PROJECTS_JSON: ${{ secrets.SUPABASE_PROJECTS_JSON }}
         run: |
-          # Install jq for JSON parsing
-          sudo apt-get update -y > /dev/null
-          sudo apt-get install -y jq > /dev/null
-
           LENGTH=$(echo "$SUPABASE_PROJECTS_JSON" | jq '. | length')
           echo "📦 Found $LENGTH Supabase project(s)."
 
@@ -33,6 +29,9 @@ jobs:
             echo "⚠️ No projects defined in SUPABASE_PROJECTS_JSON."
             exit 0
           fi
+
+          # Timestamp actual en formato ISO-8601 UTC
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           for i in $(seq 0 $((LENGTH - 1))); do
             URL=$(echo "$SUPABASE_PROJECTS_JSON" | jq -r ".[$i].url")
@@ -48,14 +47,19 @@ jobs:
               continue
             fi
 
-            # --- CONSULTA REAL A LA BASE DE DATOS ---
-            # Usamos la tabla keepalive que creaste
-            PING_URL="$URL/rest/v1/keepalive?select=id&limit=1"
-            echo "🌐 Pinging PostgreSQL via: $PING_URL"
+            # --- ACTUALIZACIÓN EN LA BASE DE DATOS ---
+            # Hacemos un UPDATE (PATCH) sobre la fila id=1 para renovar pinged_at
+            PING_URL="${URL%/}/rest/v1/keepalive?id=eq.1"
+            echo "🌐 Updating PostgreSQL keepalive via: $PING_URL"
 
             set +e
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -X PATCH \
               -H "apikey: $KEY" \
+              -H "Authorization: Bearer $KEY" \
+              -H "Content-Type: application/json" \
+              -H "Prefer: return=minimal" \
+              -d "{\"pinged_at\": \"$NOW\"}" \
               "$PING_URL")
             CURL_EXIT=$?
             set -e
@@ -66,8 +70,8 @@ jobs:
             fi
 
             if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-              echo "✅ $URL responded with HTTP $HTTP_CODE — DB pinged, project will stay awake."
+              echo "✅ $URL responded with HTTP $HTTP_CODE — pinged_at set to $NOW."
             else
-              echo "❌ $URL responded with HTTP $HTTP_CODE — check table permissions or URL."
+              echo "❌ $URL responded with HTTP $HTTP_CODE — check RLS permissions or URL."
             fi
           done
