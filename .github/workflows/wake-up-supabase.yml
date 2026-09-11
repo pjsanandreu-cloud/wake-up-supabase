@@ -2,67 +2,66 @@ name: Wake Up Supabase
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # Runs daily at 06:00 UTC
-  workflow_dispatch:      # Allows manual trigger
+    - cron: '0 6 * * *'  # Se ejecuta cada día a las 06:00 UTC
+  workflow_dispatch:      # Permite ejecución manual
 
 jobs:
   ping-projects:
     runs-on: ubuntu-latest
     steps:
-      - name: Check if secret is set
-        run: |
-          if [ -z "${{ secrets.SUPABASE_PROJECTS_JSON }}" ]; then
-            echo "❌ Secret SUPABASE_PROJECTS_JSON is not set."
-            echo "Go to Settings → Secrets and variables → Actions and add it."
-            exit 1
-          fi
-
-      - name: Update keepalive table on Supabase projects
+      - name: Update keepalive on Supabase projects
         env:
           SUPABASE_PROJECTS_JSON: ${{ secrets.SUPABASE_PROJECTS_JSON }}
         run: |
-          LENGTH=$(echo "$SUPABASE_PROJECTS_JSON" | jq '. | length')
-          echo "📦 Found $LENGTH Supabase project(s)."
+          python3 -c '
+          import json, os, sys, urllib.request, datetime
 
-          if [ "$LENGTH" -eq 0 ]; then
-            echo "⚠️ No projects defined in SUPABASE_PROJECTS_JSON."
-            exit 0
-          fi
+          raw_json = os.environ.get("SUPABASE_PROJECTS_JSON", "")
+          if not raw_json.strip():
+              print("❌ Secret SUPABASE_PROJECTS_JSON is not set or empty.")
+              sys.exit(1)
 
-          NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          try:
+              projects = json.loads(raw_json)
+          except Exception as e:
+              print(f"❌ Error parsing JSON secret: {e}")
+              sys.exit(1)
 
-          for i in $(seq 0 $((LENGTH - 1))); do
-            URL=$(echo "$SUPABASE_PROJECTS_JSON" | jq -r ".[$i].url")
-            KEY=$(echo "$SUPABASE_PROJECTS_JSON" | jq -r ".[$i].anon_key")
+          print(f"📦 Found {len(projects)} Supabase project(s).\n")
+          now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-            if [ -z "$URL" ] || [ "$URL" = "null" ] || [ -z "$KEY" ] || [ "$KEY" = "null" ]; then
-              echo "⚠️ Skipping project index $i — missing url or anon_key."
-              continue
-            fi
+          for idx, proj in enumerate(projects):
+              url = proj.get("url", "").rstrip("/")
+              key = proj.get("anon_key", "").strip()
+              name = proj.get("name", f"project-{idx+1}")
 
-            PING_URL="${URL%/}/rest/v1/keepalive?id=eq.1"
-            echo "🌐 Updating PostgreSQL keepalive via: $PING_URL"
+              if not url or not key:
+                  print(f"⚠️ Skipping [{name}] — missing url or anon_key.")
+                  continue
 
-            set +e
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-              -X PATCH \
-              -H "apikey: $KEY" \
-              -H "Authorization: Bearer $KEY" \
-              -H "Content-Type: application/json" \
-              -H "Prefer: return=minimal" \
-              -d "{\"pinged_at\": \"$NOW\"}" \
-              "$PING_URL")
-            CURL_EXIT=$?
-            set -e
+              target_url = f"{url}/rest/v1/keepalive?id=eq.1"
+              print(f"🌐 Updating keepalive table: {name} ({url})")
 
-            if [ "$CURL_EXIT" -ne 0 ]; then
-              echo "❌ Curl failed for $URL (exit code $CURL_EXIT). Skipping."
-              continue
-            fi
+              payload = json.dumps({"pinged_at": now_iso}).encode("utf-8")
+              req = urllib.request.Request(
+                  target_url,
+                  data=payload,
+                  headers={
+                      "apikey": key,
+                      "Authorization": f"Bearer {key}",
+                      "Content-Type": "application/json",
+                      "Prefer": "return=minimal"
+                  },
+                  method="PATCH"
+              )
 
-            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
-              echo "✅ $URL updated successfully (HTTP $HTTP_CODE) — pinged_at set to $NOW."
-            else
-              echo "❌ $URL responded with HTTP $HTTP_CODE — verify RLS permissions or API key."
-            fi
-          done
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as resp:
+                      code = resp.getcode()
+                      print(f"✅ [{name}] updated successfully (HTTP {code}) — pinged_at set to {now_iso}\n")
+              except urllib.error.HTTPError as e:
+                  print(f"❌ [{name}] FAILED with HTTP {e.code}: {e.reason}")
+                  print(f"   Check RLS permissions for UPDATE or verify API key for this project.\n")
+              except Exception as e:
+                  print(f"❌ Connection error for [{name}]: {e}\n")
+          '
